@@ -1,0 +1,1 @@
+Welcome to the repository for Group 41's Reproducibility Project as part of the CS4240 Deep Learning course at TU Delft. This project aims to replicate and analyze the results of a notable research paper in the field of Deep Learning. The paper in question is "Data-driven discovery of coordinates and governing equations". 
