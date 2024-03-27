@@ -1,0 +1,207 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class FullNetwork(nn.Module):
+    def __init__(self, params):
+        super(FullNetwork, self).__init__()
+        self.input_dim = params['input_dim']
+        self.latent_dim = params['latent_dim']
+        self.poly_order = params['poly_order']
+        self.include_sine = params.get('include_sine', False)
+        self.library_dim = params['library_dim']
+        self.model_order = params['model_order']
+
+        # Initialize Autoencoder
+        if params['activation'] == 'linear':
+            self.autoencoder = LinearAutoencoder(self.input_dim, self.latent_dim)
+        else:
+            self.autoencoder = NonLinearAutoencoder(self.input_dim, self.latent_dim, params['widths'], activation_fn=F.elu)
+        
+        # Initialize SINDy Coefficients
+        self.sindy_coefficients = nn.Parameter(torch.Tensor(self.library_dim, self.latent_dim))
+        self._initialize_coefficients(params['coefficient_initialization'], params.get('init_coefficients'))
+
+    def _initialize_coefficients(self, init_method, init_values=None):
+        if init_method == 'xavier':
+            nn.init.xavier_uniform_(self.sindy_coefficients)
+        elif init_method == 'specified' and init_values is not None:
+            self.sindy_coefficients.data = init_values
+        elif init_method == 'constant':
+            nn.init.constant_(self.sindy_coefficients, 1.0)
+        elif init_method == 'normal':
+            nn.init.normal_(self.sindy_coefficients)
+        else:
+            raise ValueError("Unknown coefficient initialization method.")
+
+    def forward(self, x, dx, ddx=None):
+        # Encode and Decode
+        z, x_decode = self.autoencoder(x)
+
+        # Derivative computation
+        if self.model_order == 1:
+            dz = z_derivative(x, dx, self.autoencoder.encoder, activation='elu')
+            Theta = sindy_library_tf(z, self.latent_dim, self.poly_order, self.include_sine)
+        else:
+            dz, ddz = z_derivative_order2(x, dx, ddx, self.autoencoder.encoder, activation='elu')
+            Theta = sindy_library_tf_order2(z, dz, self.latent_dim, self.poly_order, self.include_sine)
+
+        # Apply SINDy coefficients
+        sindy_predict = torch.matmul(Theta, self.sindy_coefficients)
+
+        # Decode derivatives
+        if self.model_order == 1:
+            dx_decode = z_derivative(z, sindy_predict, self.autoencoder.decoder, activation='elu')
+        else:
+            dx_decode, ddx_decode = z_derivative_order2(z, dz, sindy_predict, self.autoencoder.decoder, activation='elu')
+
+        return x_decode, dx_decode, (ddx_decode if self.model_order == 2 else None)
+
+class LinearAutoencoder(nn.Module):
+    def __init__(self, input_dim, latent_dim):
+        super(LinearAutoencoder, self).__init__()
+        self.encoder = nn.Linear(input_dim, latent_dim)
+        self.decoder = nn.Linear(latent_dim, input_dim)
+
+    def forward(self, x):
+        z = self.encoder(x)
+        x_decode = self.decoder(z)
+        return z, x_decode
+    
+class CustomLayer(nn.Module):
+    def __init__(self, input_dim, output_dim, activation_fn):
+        super(CustomLayer, self).__init__()
+        self.linear = nn.Linear(input_dim, output_dim)
+        self.activation = activation_fn
+
+    def forward(self, input):
+        x = self.linear(input)
+        if self.activation is not None:
+            x = self.activation(x)
+        return x
+
+class NonLinearAutoencoder(nn.Module):
+    def __init__(self, input_dim, latent_dim, widths, activation_fn=F.elu):
+        super(NonLinearAutoencoder, self).__init__()
+        self.encoder = nn.Sequential(*self._build_layers(input_dim, latent_dim, widths, activation_fn))
+        self.decoder = nn.Sequential(*self._build_layers(latent_dim, input_dim, widths[::-1], None)) # No activation on final layer
+
+    def _build_layers(self, input_dim, output_dim, widths, activation_fn):
+        layers = []
+        last_dim = input_dim
+        for width in widths:
+            layers.append(CustomLayer(last_dim, width, activation_fn))
+            last_dim = width
+        layers.append(CustomLayer(last_dim, output_dim, None)) # No activation on final layer
+        return layers
+    
+    def forward(self, x):
+        z = self.encoder(x)
+        x_decode = self.decoder(z)
+        return z, x_decode
+
+def sindy_library_tf(z, latent_dim, poly_order, include_sine=False):
+    """
+    Build the SINDy library in PyTorch.
+    """
+    library = [torch.ones(z.shape[0], 1, device=z.device)]
+
+    for i in range(latent_dim):
+        library.append(z[:, i:i+1])
+
+    if poly_order > 1:
+        for i in range(latent_dim):
+            for j in range(i, latent_dim):
+                library.append(z[:, i:i+1] * z[:, j:j+1])
+
+    if poly_order > 2:
+        for i in range(latent_dim):
+            for j in range(i,latent_dim):
+                for k in range(j,latent_dim):
+                    library.append(z[:,i]*z[:,j]*z[:,k])
+
+    if poly_order > 3:
+        for i in range(latent_dim):
+            for j in range(i,latent_dim):
+                for k in range(j,latent_dim):
+                    for p in range(k,latent_dim):
+                        library.append(z[:,i]*z[:,j]*z[:,k]*z[:,p])
+
+    if poly_order > 4:
+        for i in range(latent_dim):
+            for j in range(i,latent_dim):
+                for k in range(j,latent_dim):
+                    for p in range(k,latent_dim):
+                        for q in range(p,latent_dim):
+                            library.append(z[:,i]*z[:,j]*z[:,k]*z[:,p]*z[:,q])
+
+    if include_sine:
+        for i in range(latent_dim):
+            library.append(torch.sin(z[:, i:i+1]))
+
+    return torch.cat(library, dim=1)
+
+def sindy_library_tf_order2(z, dz, latent_dim, poly_order, include_sine=False):
+    """
+    Build the SINDy library for a second-order system in PyTorch.
+    """
+    z_combined = torch.cat([z, dz], dim=1)
+    return sindy_library_tf(z_combined, 2*latent_dim, poly_order, include_sine)
+
+def z_derivative(input, dx, layers, activation='elu'):
+    dz = dx
+    for i, layer in enumerate(layers):
+        if i < len(layers) - 1:
+            input = layer(input)
+            if activation == 'elu':
+                dz = torch.min(torch.exp(input), torch.tensor(1.0)) * layer.linear(dz)
+                input = F.elu(input)
+            elif activation == 'relu':
+                dz = (input > 0).float() * layer.linear(dz)
+                input = F.relu(input)
+            # Add other activation conditions here
+        else:
+            dz = layer.linear(dz)
+    return dz
+
+def z_derivative_order2(input, dx, ddx, layers, activation='elu'):
+    dz = dx
+    ddz = ddx
+    for i, layer in enumerate(layers):
+        if i < len(layers) - 1:
+            input = layer(input)
+
+            if activation == 'elu':
+                # ELU derivative: exp(input) if input < 0 else 1
+                elu_derivative = torch.where(input < 0, torch.exp(input), torch.tensor(1.0))
+                elu_double_derivative = torch.where(input < 0, torch.exp(input), torch.tensor(0.0))
+                
+                dz_prev = layer.linear(dz)
+                ddz_prev = layer.linear(ddz)
+
+                # Apply the chain rule for the first and second derivative
+                dz = elu_derivative * dz_prev
+                ddz = elu_double_derivative * dz_prev * dz_prev + elu_derivative * ddz_prev
+
+                input = F.elu(input)
+
+            elif activation == 'relu':
+                # ReLU derivative: 1 if input > 0 else 0
+                relu_derivative = (input > 0).float()
+                relu_double_derivative = torch.zeros_like(input) # second derivative of ReLU is 0
+
+                dz_prev = layer.linear(dz)
+                ddz_prev = layer.linear(ddz)
+
+                # Apply the chain rule for the first and second derivative
+                dz = relu_derivative * dz_prev
+                ddz = relu_double_derivative * dz_prev * dz_prev + relu_derivative * ddz_prev
+
+                input = F.relu(input)
+
+            # Add other activation conditions here
+        else:
+            dz = layer.linear(dz)
+            ddz = layer.linear(ddz)
+
+    return dz, ddz

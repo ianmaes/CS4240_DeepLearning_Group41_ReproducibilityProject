@@ -158,4 +158,3 @@ def create_feed_dictionary(data, params, idxs=None):
         feed_dict['coefficient_mask'] = torch.tensor(params['coefficient_mask'], dtype=torch.float32)
     feed_dict['learning_rate'] = torch.tensor(params['learning_rate'], dtype=torch.float32)
     return feed_dict
-
