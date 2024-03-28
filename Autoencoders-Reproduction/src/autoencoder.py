@@ -11,12 +11,18 @@ class FullNetwork(nn.Module):
         self.include_sine = params.get('include_sine', False)
         self.library_dim = params['library_dim']
         self.model_order = params['model_order']
-
+        self.activation = params['activation']
+        if self.activation == 'relu':
+            self.activation = F.relu
+        elif self.activation == 'elu':
+            self.activation = F.elu
+        elif self.activation == 'sigmoid':
+            self.activation = F.sigmoid
         # Initialize Autoencoder
         if params['activation'] == 'linear':
             self.autoencoder = LinearAutoencoder(self.input_dim, self.latent_dim)
         else:
-            self.autoencoder = NonLinearAutoencoder(self.input_dim, self.latent_dim, params['widths'], activation_fn=F.elu)
+            self.autoencoder = NonLinearAutoencoder(self.input_dim, self.latent_dim, params['widths'], activation_fn=self.activation)
         
         # Initialize SINDy Coefficients
         self.sindy_coefficients = nn.Parameter(torch.Tensor(self.library_dim, self.latent_dim))
@@ -104,8 +110,7 @@ def sindy_library_tf(z, latent_dim, poly_order, include_sine=False):
     """
     Build the SINDy library in PyTorch.
     """
-    library = [torch.ones(z.shape[0], 1, device=z.device)]
-
+    library = [torch.ones((z.shape[0], 1), device=z.device)]
     for i in range(latent_dim):
         library.append(z[:, i:i+1])
 
@@ -118,14 +123,14 @@ def sindy_library_tf(z, latent_dim, poly_order, include_sine=False):
         for i in range(latent_dim):
             for j in range(i,latent_dim):
                 for k in range(j,latent_dim):
-                    library.append(z[:,i]*z[:,j]*z[:,k])
+                    library.append((z[:,i]*z[:,j]*z[:,k]).unsqueeze(1))
 
     if poly_order > 3:
         for i in range(latent_dim):
             for j in range(i,latent_dim):
                 for k in range(j,latent_dim):
                     for p in range(k,latent_dim):
-                        library.append(z[:,i]*z[:,j]*z[:,k]*z[:,p])
+                        library.append((z[:,i]*z[:,j]*z[:,k]*z[:,p]).unsqueeze(1))
 
     if poly_order > 4:
         for i in range(latent_dim):
@@ -133,12 +138,15 @@ def sindy_library_tf(z, latent_dim, poly_order, include_sine=False):
                 for k in range(j,latent_dim):
                     for p in range(k,latent_dim):
                         for q in range(p,latent_dim):
-                            library.append(z[:,i]*z[:,j]*z[:,k]*z[:,p]*z[:,q])
+                            library.append((z[:,i]*z[:,j]*z[:,k]*z[:,p]*z[:,q]).unsqueeze(1))
 
     if include_sine:
         for i in range(latent_dim):
             library.append(torch.sin(z[:, i:i+1]))
 
+    for i in library:
+        print(i.shape)
+    print(torch.cat(library, dim=1).shape)
     return torch.cat(library, dim=1)
 
 def sindy_library_tf_order2(z, dz, latent_dim, poly_order, include_sine=False):
