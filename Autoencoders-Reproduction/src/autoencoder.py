@@ -31,12 +31,16 @@ class FullNetwork(nn.Module):
     def _initialize_coefficients(self, init_method, init_values=None):
         if init_method == 'xavier':
             nn.init.xavier_uniform_(self.sindy_coefficients)
+            print("Xavier initialization")
         elif init_method == 'specified' and init_values is not None:
             self.sindy_coefficients.data = init_values
+            print("Specified initialization")
         elif init_method == 'constant':
             nn.init.constant_(self.sindy_coefficients, 1.0)
+            print("Constant initialization")
         elif init_method == 'normal':
             nn.init.normal_(self.sindy_coefficients)
+            print("Normal initialization")
         else:
             raise ValueError("Unknown coefficient initialization method.")
 
@@ -167,7 +171,9 @@ def z_derivative(input, dx, layers, activation='elu'):
             elif activation == 'relu':
                 dz = (input > 0).float() * layer.linear(dz)
                 input = F.relu(input)
-            # Add other activation conditions here
+            elif activation == 'sigmoid':
+                dz = F.sigmoid(input) * (1 - torch.sigmoid(input)) * layer.linear(dz)
+                input = F.sigmoid(input)
         else:
             dz = layer.linear(dz)
     return dz
@@ -206,6 +212,20 @@ def z_derivative_order2(input, dx, ddx, layers, activation='elu'):
                 ddz = relu_double_derivative * dz_prev * dz_prev + relu_derivative * ddz_prev
 
                 input = F.relu(input)
+
+            elif activation == 'sigmoid':
+                # Sigmoid derivative: sigmoid(input) * (1 - sigmoid(input))
+                sigmoid_derivative = F.sigmoid(input) * (1 - F.sigmoid(input))
+                sigmoid_double_derivative = F.sigmoid(input) * (1 - F.sigmoid(input)) * (1 - 2 * F.sigmoid(input))
+
+                dz_prev = layer.linear(dz)
+                ddz_prev = layer.linear(ddz)
+
+                # Apply the chain rule for the first and second derivative
+                dz = sigmoid_derivative * dz_prev
+                ddz = sigmoid_double_derivative * dz_prev * dz_prev + sigmoid_derivative * ddz_prev
+
+                input = F.sigmoid(input)
 
             # Add other activation conditions here
         else:
