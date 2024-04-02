@@ -18,6 +18,7 @@ class FullNetwork(nn.Module):
             self.activation = F.elu
         elif self.activation == 'sigmoid':
             self.activation = F.sigmoid
+        self.activation_name = params['activation']
         # Initialize Autoencoder
         if params['activation'] == 'linear':
             self.autoencoder = LinearAutoencoder(self.input_dim, self.latent_dim)
@@ -50,10 +51,10 @@ class FullNetwork(nn.Module):
 
         # Derivative computation
         if self.model_order == 1:
-            dz = z_derivative(x, dx, self.autoencoder.encoder, activation='elu')
+            dz = z_derivative(x, dx, self.autoencoder.encoder, activation=self.activation_name)
             Theta = sindy_library_tf(z, self.latent_dim, self.poly_order, self.include_sine)
         else:
-            dz, ddz = z_derivative_order2(x, dx, ddx, self.autoencoder.encoder, activation='elu')
+            dz, ddz = z_derivative_order2(x, dx, ddx, self.autoencoder.encoder, activation=self.activation_name)
             Theta = sindy_library_tf_order2(z, dz, self.latent_dim, self.poly_order, self.include_sine)
 
         # Apply SINDy coefficients
@@ -61,11 +62,46 @@ class FullNetwork(nn.Module):
 
         # Decode derivatives
         if self.model_order == 1:
-            dx_decode = z_derivative(z, sindy_predict, self.autoencoder.decoder, activation='elu')
+            dx_decode = z_derivative(z, sindy_predict, self.autoencoder.decoder, activation=self.activation_name)
         else:
-            dx_decode, ddx_decode = z_derivative_order2(z, dz, sindy_predict, self.autoencoder.decoder, activation='elu')
+            dx_decode, ddx_decode = z_derivative_order2(z, dz, sindy_predict, self.autoencoder.decoder, activation=self)
 
         return x_decode, dx_decode, (ddx_decode if self.model_order == 2 else None)
+    
+    # def compute_loss(self, x, dx, ddx=None, params=None):
+    #     x_decode, dx_decode, ddx_decode = self.forward(x, dx, ddx)
+
+    #     # Loss for the decoder
+    #     criterion = nn.MSELoss()
+    #     loss_decoder = criterion(x_decode, x)
+
+    #     # Loss for the SINDy predictions
+    #     if self.model_order == 1:
+    #         dz = z_derivative(x, dx, self.autoencoder.encoder, activation=self.activation_name)
+    #         Theta = sindy_library_tf(self.autoencoder.encoder(x), self.latent_dim, self.poly_order, self.include_sine)
+    #     else:
+    #         dz, ddz = z_derivative_order2(x, dx, ddx, self.autoencoder.encoder, activation=self.activation_name)
+    #         Theta = sindy_library_tf_order2(self.autoencoder.encoder(x), dz, self.latent_dim, self.poly_order, self.include_sine)
+
+    #     sindy_predict = torch.matmul(Theta, self.sindy_coefficients)
+
+    #     if self.model_order == 1:
+    #         loss_sindy_z = criterion(dz, sindy_predict)
+    #         loss_sindy_x = criterion(dx_decode, dx)
+    #     else:
+    #         loss_sindy_z = criterion(ddz, sindy_predict)
+    #         loss_sindy_x = criterion(ddx_decode, ddx)
+
+    #     # Regularization loss
+    #     loss_sindy_regularization = torch.mean(torch.abs(self.sindy_coefficients))
+
+    #     # Total loss
+    #     total_loss = (params['loss_weight_decoder'] * loss_decoder +
+    #                   params['loss_weight_sindy_z'] * loss_sindy_z +
+    #                   params['loss_weight_sindy_x'] * loss_sindy_x +
+    #                   params['loss_weight_sindy_regularization'] * loss_sindy_regularization)
+
+    #     return total_loss
 
 class LinearAutoencoder(nn.Module):
     def __init__(self, input_dim, latent_dim):
@@ -91,7 +127,7 @@ class CustomLayer(nn.Module):
         return x
 
 class NonLinearAutoencoder(nn.Module):
-    def __init__(self, input_dim, latent_dim, widths, activation_fn=F.elu):
+    def __init__(self, input_dim, latent_dim, widths, activation_fn):
         super(NonLinearAutoencoder, self).__init__()
         self.encoder = nn.Sequential(*self._build_layers(input_dim, latent_dim, widths, activation_fn))
         self.decoder = nn.Sequential(*self._build_layers(latent_dim, input_dim, widths[::-1], None)) # No activation on final layer

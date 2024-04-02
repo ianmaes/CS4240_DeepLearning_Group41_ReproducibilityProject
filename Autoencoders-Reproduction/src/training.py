@@ -3,11 +3,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import pickle
-from autoencoder import full_network, define_loss
+from autoencoder import FullNetwork, define_loss
 
 def train_network(training_data, val_data, params):
     # SET UP NETWORK
-    autoencoder_network = full_network(params)
+    autoencoder_network = FullNetwork(params)
     loss, losses, loss_refinement = define_loss(autoencoder_network, params)
     
     # Define optimizer
