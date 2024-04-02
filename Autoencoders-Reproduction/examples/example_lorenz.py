@@ -2,9 +2,8 @@ import numpy as np
 from scipy.integrate import odeint
 from scipy.special import legendre, chebyt
 import sys
-sys.path.append(r'C:\Users\ianma\Desktop\Study\CS4240_DeepLearning_Group41_ReproducibilityProject\Autoencoders-Reproduction\src')
+sys.path.append(r'Autoencoders-Reproduction\src')
 from sindy_utils import library_size
-print( 'hi')
 
 def get_lorenz_data(n_ics, noise_strength=0):
     """
