@@ -3,12 +3,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import pickle
-from autoencoder import FullNetwork, define_loss
+from autoencoder import FullNetwork
 
 def train_network(training_data, val_data, params):
     # SET UP NETWORK
     autoencoder_network = FullNetwork(params)
-    loss, losses, loss_refinement = define_loss(autoencoder_network, params)
+    loss, losses, loss_refinement = autoencoder_network.define_loss(torch.tensor(training_data['x'], dtype=torch.float32), torch.tensor(training_data['dx'], dtype=torch.float32), params)
     
     # Define optimizer
     optimizer = optim.Adam(autoencoder_network.parameters(), lr=params['learning_rate'])

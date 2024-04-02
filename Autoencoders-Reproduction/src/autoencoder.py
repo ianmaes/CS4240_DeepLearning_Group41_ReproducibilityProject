@@ -68,40 +68,53 @@ class FullNetwork(nn.Module):
 
         return x_decode, dx_decode, (ddx_decode if self.model_order == 2 else None)
     
-    # def compute_loss(self, x, dx, ddx=None, params=None):
-    #     x_decode, dx_decode, ddx_decode = self.forward(x, dx, ddx)
+    def define_loss(self, x, dx, ddx=None, params=None):
+        x_decode, dx_decode, ddx_decode = self.forward(x, dx, ddx)
 
-    #     # Loss for the decoder
-    #     criterion = nn.MSELoss()
-    #     loss_decoder = criterion(x_decode, x)
+        # Loss for the decoder
+        criterion = nn.MSELoss()
+        loss_decoder = criterion(x_decode, x)
 
-    #     # Loss for the SINDy predictions
-    #     if self.model_order == 1:
-    #         dz = z_derivative(x, dx, self.autoencoder.encoder, activation=self.activation_name)
-    #         Theta = sindy_library_tf(self.autoencoder.encoder(x), self.latent_dim, self.poly_order, self.include_sine)
-    #     else:
-    #         dz, ddz = z_derivative_order2(x, dx, ddx, self.autoencoder.encoder, activation=self.activation_name)
-    #         Theta = sindy_library_tf_order2(self.autoencoder.encoder(x), dz, self.latent_dim, self.poly_order, self.include_sine)
+        # Loss for the SINDy predictions
+        if self.model_order == 1:
+            dz = z_derivative(x, dx, self.autoencoder.encoder, activation=self.activation_name)
+            Theta = sindy_library_tf(self.autoencoder.encoder(x), self.latent_dim, self.poly_order, self.include_sine)
+        else:
+            dz, ddz = z_derivative_order2(x, dx, ddx, self.autoencoder.encoder, activation=self.activation_name)
+            Theta = sindy_library_tf_order2(self.autoencoder.encoder(x), dz, self.latent_dim, self.poly_order, self.include_sine)
 
-    #     sindy_predict = torch.matmul(Theta, self.sindy_coefficients)
+        sindy_predict = torch.matmul(Theta, self.sindy_coefficients)
 
-    #     if self.model_order == 1:
-    #         loss_sindy_z = criterion(dz, sindy_predict)
-    #         loss_sindy_x = criterion(dx_decode, dx)
-    #     else:
-    #         loss_sindy_z = criterion(ddz, sindy_predict)
-    #         loss_sindy_x = criterion(ddx_decode, ddx)
+        if self.model_order == 1:
+            loss_sindy_z = criterion(dz, sindy_predict)
+            loss_sindy_x = criterion(dx_decode, dx)
+        else:
+            loss_sindy_z = criterion(ddz, sindy_predict)
+            loss_sindy_x = criterion(ddx_decode, ddx)
 
-    #     # Regularization loss
-    #     loss_sindy_regularization = torch.mean(torch.abs(self.sindy_coefficients))
+        # Regularization loss
+        loss_sindy_regularization = torch.mean(torch.abs(self.sindy_coefficients))
 
-    #     # Total loss
-    #     total_loss = (params['loss_weight_decoder'] * loss_decoder +
-    #                   params['loss_weight_sindy_z'] * loss_sindy_z +
-    #                   params['loss_weight_sindy_x'] * loss_sindy_x +
-    #                   params['loss_weight_sindy_regularization'] * loss_sindy_regularization)
+        losses = {}
+        losses['decoder'] = torch.mean((x - x_decode)**2)
+        if params['model_order'] == 1:
+            losses['sindy_z'] = torch.mean((dz - sindy_predict)**2)
+            losses['sindy_x'] = torch.mean((dx - dx_decode)**2)
+        else:
+            losses['sindy_z'] = torch.mean((ddz - sindy_predict)**2)
+            losses['sindy_x'] = torch.mean((ddx - ddx_decode)**2)
+        losses['sindy_regularization'] = torch.mean(torch.abs(self.sindy_coefficients))
 
-    #     return total_loss
+        total_loss = (params['loss_weight_decoder'] * loss_decoder +
+                    params['loss_weight_sindy_z'] * loss_sindy_z +
+                    params['loss_weight_sindy_x'] * loss_sindy_x +
+                    params['loss_weight_sindy_regularization'] * loss_sindy_regularization)
+        
+        loss_refinement = (params['loss_weight_decoder'] * loss_decoder +
+                    params['loss_weight_sindy_z'] * loss_sindy_z +
+                    params['loss_weight_sindy_x'] * loss_sindy_x)
+
+        return total_loss, losses, loss_refinement
 
 class LinearAutoencoder(nn.Module):
     def __init__(self, input_dim, latent_dim):
