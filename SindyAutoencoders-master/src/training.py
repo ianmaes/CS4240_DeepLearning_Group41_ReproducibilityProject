@@ -31,7 +31,6 @@ def train_network(training_data, val_data, params):
                 batch_idxs = np.arange(j*params['batch_size'], (j+1)*params['batch_size'])
                 train_dict = create_feed_dictionary(training_data, params, idxs=batch_idxs)
                 sess.run(train_op, feed_dict=train_dict)
-            
             if params['print_progress'] and (i % params['print_frequency'] == 0):
                 validation_losses.append(print_progress(sess, i, loss, losses, train_dict, validation_dict, x_norm, sindy_predict_norm_x))
 

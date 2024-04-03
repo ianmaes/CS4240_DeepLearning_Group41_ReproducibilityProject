@@ -32,21 +32,17 @@ class FullNetwork(nn.Module):
     def _initialize_coefficients(self, init_method, init_values=None):
         if init_method == 'xavier':
             nn.init.xavier_uniform_(self.sindy_coefficients)
-            print("Xavier initialization")
         elif init_method == 'specified' and init_values is not None:
             self.sindy_coefficients.data = init_values
-            print("Specified initialization")
         elif init_method == 'constant':
             nn.init.constant_(self.sindy_coefficients, 1.0)
-            print("Constant initialization")
         elif init_method == 'normal':
             nn.init.normal_(self.sindy_coefficients)
-            print("Normal initialization")
         else:
             raise ValueError("Unknown coefficient initialization method.")
 
     def forward(self, x, dx, ddx=None):
-        # Encode and Decode
+    
         z, x_decode = self.autoencoder(x)
 
         # Derivative computation
@@ -59,32 +55,26 @@ class FullNetwork(nn.Module):
 
         # Apply SINDy coefficients
         sindy_predict = torch.matmul(Theta, self.sindy_coefficients)
-
+        ddz = None
+        ddx_decode = None
         # Decode derivatives
         if self.model_order == 1:
             dx_decode = z_derivative(z, sindy_predict, self.autoencoder.decoder, activation=self.activation_name)
         else:
             dx_decode, ddx_decode = z_derivative_order2(z, dz, sindy_predict, self.autoencoder.decoder, activation=self)
 
-        return x_decode, dx_decode, (ddx_decode if self.model_order == 2 else None)
+        return x_decode, dx_decode, ddx_decode, z, dz, ddz, Theta, sindy_predict
     
     def define_loss(self, x, dx, ddx=None, params=None):
-        x_decode, dx_decode, ddx_decode = self.forward(x, dx, ddx)
 
+        x_decode, dx_decode, ddx_decode, z, dz, ddz, Theta, sindy_predict = self.forward(x, dx, ddx)
         # Loss for the decoder
         criterion = nn.MSELoss()
         loss_decoder = criterion(x_decode, x)
 
-        # Loss for the SINDy predictions
-        if self.model_order == 1:
-            dz = z_derivative(x, dx, self.autoencoder.encoder, activation=self.activation_name)
-            Theta = sindy_library_tf(self.autoencoder.encoder(x), self.latent_dim, self.poly_order, self.include_sine)
-        else:
-            dz, ddz = z_derivative_order2(x, dx, ddx, self.autoencoder.encoder, activation=self.activation_name)
-            Theta = sindy_library_tf_order2(self.autoencoder.encoder(x), dz, self.latent_dim, self.poly_order, self.include_sine)
+        self.sindy_coefficients_masked = torch.tensor(params['coefficient_mask'], dtype=torch.float32) * self.sindy_coefficients
 
-        sindy_predict = torch.matmul(Theta, self.sindy_coefficients)
-
+        
         if self.model_order == 1:
             loss_sindy_z = criterion(dz, sindy_predict)
             loss_sindy_x = criterion(dx_decode, dx)
@@ -93,11 +83,11 @@ class FullNetwork(nn.Module):
             loss_sindy_x = criterion(ddx_decode, ddx)
 
         # Regularization loss
-        loss_sindy_regularization = torch.mean(torch.abs(self.sindy_coefficients))
+        loss_sindy_regularization = torch.mean(torch.abs(self.sindy_coefficients_masked))
 
         losses = {}
         losses['decoder'] = torch.mean((x - x_decode)**2)
-        if params['model_order'] == 1:
+        if self.model_order == 1:
             losses['sindy_z'] = torch.mean((dz - sindy_predict)**2)
             losses['sindy_x'] = torch.mean((dx - dx_decode)**2)
         else:
@@ -197,9 +187,6 @@ def sindy_library_tf(z, latent_dim, poly_order, include_sine=False):
         for i in range(latent_dim):
             library.append(torch.sin(z[:, i:i+1]))
 
-    for i in library:
-        print(i.shape)
-    print(torch.cat(library, dim=1).shape)
     return torch.cat(library, dim=1)
 
 def sindy_library_tf_order2(z, dz, latent_dim, poly_order, include_sine=False):
