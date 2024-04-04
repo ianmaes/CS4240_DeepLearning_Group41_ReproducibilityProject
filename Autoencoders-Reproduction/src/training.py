@@ -27,6 +27,7 @@ def train_network(training_data, val_data, params):
     for i in range(params['max_epochs']):
         print('Epoch %d' % i)
         for j in range(params['epoch_size'] // params['batch_size']):
+            autoencoder_network.train()
             batch_idxs = np.arange(j * params['batch_size'], (j + 1) * params['batch_size'])
             train_dict = create_feed_dictionary(training_data, params, idxs=batch_idxs)
             optimizer.zero_grad()
@@ -34,15 +35,6 @@ def train_network(training_data, val_data, params):
             loss_val.backward()
             optimizer.step()
             
-            #inputs, targets = inputs.to(device), targets.to(device) # Send data to device (CPU/GPU)
-            
-            # optimizer.zero_grad()   # Zero the parameter gradients
-            # outputs = model(inputs) # Forward pass: compute the predicted outputs
-            # loss = criterion(outputs, targets) # Compute loss
-            # loss.backward()         # Backward pass: compute gradient of the loss with respect to model parameters
-            # optimizer.step()        
-            
-        
         if params['print_progress'] and (i % params['print_frequency'] == 0):
             with torch.no_grad():
                 validation_losses.append(print_progress(autoencoder_network, i, params, train_dict, validation_dict, x_norm, sindy_predict_norm_x))

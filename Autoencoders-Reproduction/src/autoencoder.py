@@ -14,11 +14,11 @@ class FullNetwork(nn.Module):
         self.activation = params['activation']
         self.sequential_thresholding = params['sequential_thresholding']
         if self.activation == 'relu':
-            self.activation = F.relu
+            self.activation = torch.relu
         elif self.activation == 'elu':
-            self.activation = F.elu
+            self.activation = torch.elu
         elif self.activation == 'sigmoid':
-            self.activation = F.sigmoid
+            self.activation = torch.sigmoid
         self.activation_name = params['activation']
         # Initialize Autoencoder
         if params['activation'] == 'linear':
@@ -29,7 +29,7 @@ class FullNetwork(nn.Module):
         # Initialize SINDy Coefficients
         self.sindy_coefficients = nn.Parameter(torch.Tensor(self.library_dim, self.latent_dim))
         self._initialize_coefficients(params['coefficient_initialization'], params.get('init_coefficients'))
-        self.coefficient_mask = params['coefficient_mask']
+        self.coefficient_mask =torch.tensor(params['coefficient_mask'], dtype=torch.float32)
 
 
     def _initialize_coefficients(self, init_method, init_values=None):
@@ -58,7 +58,7 @@ class FullNetwork(nn.Module):
 
         # Apply SINDy coefficients
         if self.sequential_thresholding:
-            self.sindy_coefficients_masked =torch.tensor(self.coefficient_mask, dtype=torch.float32) * self.sindy_coefficients
+            self.sindy_coefficients_masked = self.coefficient_mask * self.sindy_coefficients
             sindy_predict = torch.matmul(Theta, self.sindy_coefficients_masked)
         else:
             sindy_predict = torch.matmul(Theta, self.sindy_coefficients)
@@ -78,7 +78,7 @@ class FullNetwork(nn.Module):
         x_decode, dx_decode, ddx_decode, z, dz, ddz, Theta, sindy_predict = self.forward(x, dx, ddx)
         # Loss for the decoder
 
-        self.sindy_coefficients_masked = torch.tensor(self.coefficient_mask, dtype=torch.float32) * self.sindy_coefficients
+        self.sindy_coefficients_masked = self.coefficient_mask * self.sindy_coefficients
         # Regularization loss
 
         losses = {}
@@ -91,14 +91,14 @@ class FullNetwork(nn.Module):
             losses['sindy_x'] = torch.mean((ddx - ddx_decode)**2)
         losses['sindy_regularization'] = torch.mean(torch.abs(self.sindy_coefficients_masked))
 
-        total_loss = (params['loss_weight_decoder'] * losses['decoder'] +
-                    params['loss_weight_sindy_z'] * losses['sindy_z'] +
-                    params['loss_weight_sindy_x'] * losses['sindy_x'] +
-                    params['loss_weight_sindy_regularization'] * losses['sindy_regularization'])
+        total_loss = (torch.tensor(params['loss_weight_decoder'], dtype=torch.float32) * losses['decoder'] +
+                    torch.tensor(params['loss_weight_sindy_z'], dtype=torch.float32) * losses['sindy_z'] +
+                    torch.tensor(params['loss_weight_sindy_x'], dtype=torch.float32) * losses['sindy_x'] +
+                    torch.tensor(params['loss_weight_sindy_regularization'], dtype=torch.float32) * losses['sindy_regularization'])
         
-        loss_refinement = (params['loss_weight_decoder'] * losses['decoder'] +
-                    params['loss_weight_sindy_z'] * losses['sindy_z'] +
-                    params['loss_weight_sindy_x'] * losses['sindy_x'])
+        loss_refinement = (torch.tensor(params['loss_weight_decoder'], dtype=torch.float32) * losses['decoder'] +
+                    torch.tensor(params['loss_weight_sindy_z'], dtype=torch.float32) * losses['sindy_z'] +
+                    torch.tensor(params['loss_weight_sindy_x'], dtype=torch.float32) * losses['sindy_x'])
 
         return total_loss, losses, loss_refinement
     
@@ -219,13 +219,13 @@ def z_derivative(input, dx, layers, activation):
             input = layer(input)
             if activation == 'elu':
                 dz = torch.where(input < 0, torch.exp(input), torch.ones_like(input)) * layer.linear(dz)
-                input = F.elu(input)
+                input = torch.elu(input)
             elif activation == 'relu':
                 dz = (input > 0).float() * layer.linear(dz)
-                input = F.relu(input)
+                input = torch.relu(input)
             elif activation == 'sigmoid':
-                dz = F.sigmoid(input) * (1 - torch.sigmoid(input)) * layer.linear(dz)
-                input = F.sigmoid(input)
+                dz = torch.sigmoid(input) * (1 - torch.sigmoid(input)) * layer.linear(dz)
+                input = torch.sigmoid(input)
             else:
                 dz = layer.linear(dz)
     return dz
@@ -249,7 +249,7 @@ def z_derivative_order2(input, dx, ddx, layers, activation):
                 dz = elu_derivative * dz_prev
                 ddz = elu_double_derivative * dz_prev * dz_prev + elu_derivative * ddz_prev
 
-                input = F.elu(input)
+                input = torch.elu(input)
 
             elif activation == 'relu':
                 # ReLU derivative: 1 if input > 0 else 0
@@ -263,7 +263,7 @@ def z_derivative_order2(input, dx, ddx, layers, activation):
                 dz = relu_derivative * dz_prev
                 ddz = relu_double_derivative * dz_prev * dz_prev + relu_derivative * ddz_prev
 
-                input = F.relu(input)
+                input = torch.relu(input)
 
             elif activation == 'sigmoid':
                 # Sigmoid derivative: sigmoid(input) * (1 - sigmoid(input))
@@ -277,7 +277,7 @@ def z_derivative_order2(input, dx, ddx, layers, activation):
                 dz = sigmoid_derivative * dz_prev
                 ddz = sigmoid_double_derivative * dz_prev * dz_prev + sigmoid_derivative * ddz_prev
 
-                input = F.sigmoid(input)
+                input = torch.sigmoid(input)
 
             # Add other activation conditions here
         else:
