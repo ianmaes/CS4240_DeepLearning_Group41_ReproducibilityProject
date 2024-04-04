@@ -12,6 +12,7 @@ class FullNetwork(nn.Module):
         self.library_dim = params['library_dim']
         self.model_order = params['model_order']
         self.activation = params['activation']
+        self.sequential_thresholding = params['sequential_thresholding']
         if self.activation == 'relu':
             self.activation = F.relu
         elif self.activation == 'elu':
@@ -28,6 +29,8 @@ class FullNetwork(nn.Module):
         # Initialize SINDy Coefficients
         self.sindy_coefficients = nn.Parameter(torch.Tensor(self.library_dim, self.latent_dim))
         self._initialize_coefficients(params['coefficient_initialization'], params.get('init_coefficients'))
+        self.coefficient_mask = params['coefficient_mask']
+
 
     def _initialize_coefficients(self, init_method, init_values=None):
         if init_method == 'xavier':
@@ -54,14 +57,19 @@ class FullNetwork(nn.Module):
             Theta = sindy_library_tf_order2(z, dz, self.latent_dim, self.poly_order, self.include_sine)
 
         # Apply SINDy coefficients
-        sindy_predict = torch.matmul(Theta, self.sindy_coefficients)
+        if self.sequential_thresholding:
+            self.sindy_coefficients_masked =torch.tensor(self.coefficient_mask, dtype=torch.float32) * self.sindy_coefficients
+            sindy_predict = torch.matmul(Theta, self.sindy_coefficients_masked)
+        else:
+            sindy_predict = torch.matmul(Theta, self.sindy_coefficients)
+            
         ddz = None
         ddx_decode = None
         # Decode derivatives
         if self.model_order == 1:
             dx_decode = z_derivative(z, sindy_predict, self.autoencoder.decoder, activation=self.activation_name)
         else:
-            dx_decode, ddx_decode = z_derivative_order2(z, dz, sindy_predict, self.autoencoder.decoder, activation=self)
+            dx_decode, ddx_decode = z_derivative_order2(z, dz, sindy_predict, self.autoencoder.decoder, activation=self.activation_name)
 
         return x_decode, dx_decode, ddx_decode, z, dz, ddz, Theta, sindy_predict
     
@@ -69,21 +77,9 @@ class FullNetwork(nn.Module):
 
         x_decode, dx_decode, ddx_decode, z, dz, ddz, Theta, sindy_predict = self.forward(x, dx, ddx)
         # Loss for the decoder
-        criterion = nn.MSELoss()
-        loss_decoder = criterion(x_decode, x)
 
-        self.sindy_coefficients_masked = torch.tensor(params['coefficient_mask'], dtype=torch.float32) * self.sindy_coefficients
-
-        
-        if self.model_order == 1:
-            loss_sindy_z = criterion(dz, sindy_predict)
-            loss_sindy_x = criterion(dx_decode, dx)
-        else:
-            loss_sindy_z = criterion(ddz, sindy_predict)
-            loss_sindy_x = criterion(ddx_decode, ddx)
-
+        self.sindy_coefficients_masked = torch.tensor(self.coefficient_mask, dtype=torch.float32) * self.sindy_coefficients
         # Regularization loss
-        loss_sindy_regularization = torch.mean(torch.abs(self.sindy_coefficients_masked))
 
         losses = {}
         losses['decoder'] = torch.mean((x - x_decode)**2)
@@ -93,18 +89,19 @@ class FullNetwork(nn.Module):
         else:
             losses['sindy_z'] = torch.mean((ddz - sindy_predict)**2)
             losses['sindy_x'] = torch.mean((ddx - ddx_decode)**2)
-        losses['sindy_regularization'] = torch.mean(torch.abs(self.sindy_coefficients))
+        losses['sindy_regularization'] = torch.mean(torch.abs(self.sindy_coefficients_masked))
 
-        total_loss = (params['loss_weight_decoder'] * loss_decoder +
-                    params['loss_weight_sindy_z'] * loss_sindy_z +
-                    params['loss_weight_sindy_x'] * loss_sindy_x +
-                    params['loss_weight_sindy_regularization'] * loss_sindy_regularization)
+        total_loss = (params['loss_weight_decoder'] * losses['decoder'] +
+                    params['loss_weight_sindy_z'] * losses['sindy_z'] +
+                    params['loss_weight_sindy_x'] * losses['sindy_x'] +
+                    params['loss_weight_sindy_regularization'] * losses['sindy_regularization'])
         
-        loss_refinement = (params['loss_weight_decoder'] * loss_decoder +
-                    params['loss_weight_sindy_z'] * loss_sindy_z +
-                    params['loss_weight_sindy_x'] * loss_sindy_x)
+        loss_refinement = (params['loss_weight_decoder'] * losses['decoder'] +
+                    params['loss_weight_sindy_z'] * losses['sindy_z'] +
+                    params['loss_weight_sindy_x'] * losses['sindy_x'])
 
         return total_loss, losses, loss_refinement
+    
 
 class LinearAutoencoder(nn.Module):
     def __init__(self, input_dim, latent_dim):
@@ -133,7 +130,7 @@ class NonLinearAutoencoder(nn.Module):
     def __init__(self, input_dim, latent_dim, widths, activation_fn):
         super(NonLinearAutoencoder, self).__init__()
         self.encoder = nn.Sequential(*self._build_layers(input_dim, latent_dim, widths, activation_fn))
-        self.decoder = nn.Sequential(*self._build_layers(latent_dim, input_dim, widths[::-1], None)) # No activation on final layer
+        self.decoder = nn.Sequential(*self._build_layers(latent_dim, input_dim, widths[::-1], activation_fn)) 
 
     def _build_layers(self, input_dim, output_dim, widths, activation_fn):
         layers = []
@@ -196,13 +193,13 @@ def sindy_library_tf_order2(z, dz, latent_dim, poly_order, include_sine=False):
     z_combined = torch.cat([z, dz], dim=1)
     return sindy_library_tf(z_combined, 2*latent_dim, poly_order, include_sine)
 
-def z_derivative(input, dx, layers, activation='elu'):
+def z_derivative(input, dx, layers, activation):
     dz = dx
     for i, layer in enumerate(layers):
         if i < len(layers) - 1:
             input = layer(input)
             if activation == 'elu':
-                dz = torch.min(torch.exp(input), torch.tensor(1.0)) * layer.linear(dz)
+                dz = torch.where(input < 0, torch.exp(input), torch.ones_like(input)) * layer.linear(dz)
                 input = F.elu(input)
             elif activation == 'relu':
                 dz = (input > 0).float() * layer.linear(dz)
@@ -214,7 +211,7 @@ def z_derivative(input, dx, layers, activation='elu'):
             dz = layer.linear(dz)
     return dz
 
-def z_derivative_order2(input, dx, ddx, layers, activation='elu'):
+def z_derivative_order2(input, dx, ddx, layers, activation):
     dz = dx
     ddz = ddx
     for i, layer in enumerate(layers):

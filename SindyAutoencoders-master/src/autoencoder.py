@@ -144,7 +144,7 @@ def nonlinear_autoencoder(x, input_dim, latent_dim, widths, activation='elu'):
     """
     Construct a nonlinear autoencoder.
 
-    Arguments:
+    Arguments: 
 
     Returns:
         z -
