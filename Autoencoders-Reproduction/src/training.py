@@ -6,11 +6,16 @@ import pickle
 from autoencoder import FullNetwork
 
 def train_network(training_data, val_data, params):
+        
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print('Device: %s' % device)
+    params['coefficient_mask'] = params['coefficient_mask'].to(device)
     # SET UP NETWORK
-    autoencoder_network = FullNetwork(params)
+    autoencoder_network = FullNetwork(params).to(device)
     # Define optimizer
     optimizer = optim.Adam(autoencoder_network.parameters(), lr=params['learning_rate'])
-    
+    params['device'] = device
     validation_dict = create_feed_dictionary(val_data, params, idxs=None)
 
     x_norm = torch.mean(val_data['x']**2)
@@ -37,7 +42,7 @@ def train_network(training_data, val_data, params):
             
         if params['print_progress'] and (i % params['print_frequency'] == 0):
             with torch.no_grad():
-                validation_losses.append(print_progress(autoencoder_network, i, params, train_dict, validation_dict, x_norm, sindy_predict_norm_x))
+                validation_losses.append(print_progress(autoencoder_network, i, params, training_data, val_data, x_norm, sindy_predict_norm_x))
 
         if params['sequential_thresholding'] and (i % params['threshold_frequency'] == 0) and (i > 0):
             params['coefficient_mask'] = torch.abs(autoencoder_network.sindy_coefficients) > params['coefficient_threshold']
@@ -108,10 +113,10 @@ def print_progress(network, i, params, train_dict, validation_dict, x_norm, sind
     network.eval()
     with torch.no_grad():
         # Compute losses for training data
-        train_total_loss, train_losses, _ = network.define_loss( torch.tensor(train_dict['x'], dtype=torch.float32) , torch.tensor(train_dict['dx'], dtype=torch.float32), params=params)
+        train_total_loss, train_losses, _ = network.define_loss( train_dict['x'].to(params['device']) , train_dict['dx'].to(params['device']), params=params)
 
         # Compute losses for validation data
-        val_total_loss, val_losses, _ = network.define_loss( torch.tensor(validation_dict['x'], dtype=torch.float32), torch.tensor(validation_dict['dx'], dtype=torch.float32),  params=params)
+        val_total_loss, val_losses, _ = network.define_loss(validation_dict['x'].to(params['device']), validation_dict['dx'].to(params['device']),  params=params)
 
         print(f"Epoch {i}")
         print(f"   Training Total Loss: {train_total_loss.item()}")
@@ -153,12 +158,12 @@ def create_feed_dictionary(data, params, idxs=None):
     if idxs is None:
         idxs = np.arange(data['x'].shape[0])
     feed_dict = {
-        'x': torch.tensor(data['x'][idxs], dtype=torch.float32),
-        'dx': torch.tensor(data['dx'][idxs], dtype=torch.float32)
+        'x': torch.tensor(data['x'][idxs], dtype=torch.float32).to(params['device']),
+        'dx': torch.tensor(data['dx'][idxs], dtype=torch.float32).to(params['device'])
     }
     if params['model_order'] == 2:
-        feed_dict['ddx'] = torch.tensor(data['ddx'][idxs], dtype=torch.float32)
+        feed_dict['ddx'] = torch.tensor(data['ddx'][idxs], dtype=torch.float32).to(params['device'])
     if params['sequential_thresholding']:
-        feed_dict['coefficient_mask'] = torch.tensor(params['coefficient_mask'], dtype=torch.float32)
-    feed_dict['learning_rate'] = torch.tensor(params['learning_rate'], dtype=torch.float32)
+        feed_dict['coefficient_mask'] = torch.tensor(params['coefficient_mask'], dtype=torch.float32).to(params['device'])
+    feed_dict['learning_rate'] = torch.tensor(params['learning_rate'], dtype=torch.float32).to(params['device'])
     return feed_dict

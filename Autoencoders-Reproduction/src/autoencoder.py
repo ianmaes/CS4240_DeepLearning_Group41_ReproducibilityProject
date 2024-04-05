@@ -29,7 +29,7 @@ class FullNetwork(nn.Module):
         # Initialize SINDy Coefficients
         self.sindy_coefficients = nn.Parameter(torch.Tensor(self.library_dim, self.latent_dim))
         self._initialize_coefficients(params['coefficient_initialization'], params.get('init_coefficients'))
-        self.coefficient_mask =torch.tensor(params['coefficient_mask'], dtype=torch.float32)
+        self.coefficient_mask =params['coefficient_mask']
 
 
     def _initialize_coefficients(self, init_method, init_values=None):
@@ -51,11 +51,11 @@ class FullNetwork(nn.Module):
         # Derivative computation
         if self.model_order == 1:
             dz = z_derivative(x, dx, self.autoencoder.encoder, activation=self.activation_name)
-            Theta = sindy_library_tf(z, self.latent_dim, self.poly_order, self.include_sine)
+            self.Theta = sindy_library_tf(z, self.latent_dim, self.poly_order, self.include_sine)
         else:
             dz, ddz = z_derivative_order2(x, dx, ddx, self.autoencoder.encoder, activation=self.activation_name)
-            Theta = sindy_library_tf_order2(z, dz, self.latent_dim, self.poly_order, self.include_sine)
-
+            self.Theta = sindy_library_tf_order2(z, dz, self.latent_dim, self.poly_order, self.include_sine)
+        Theta = self.Theta
         # Apply SINDy coefficients
         if self.sequential_thresholding:
             self.sindy_coefficients_masked = self.coefficient_mask * self.sindy_coefficients
@@ -91,14 +91,14 @@ class FullNetwork(nn.Module):
             losses['sindy_x'] = torch.mean((ddx - ddx_decode)**2)
         losses['sindy_regularization'] = torch.mean(torch.abs(self.sindy_coefficients_masked))
 
-        total_loss = (torch.tensor(params['loss_weight_decoder'], dtype=torch.float32) * losses['decoder'] +
-                    torch.tensor(params['loss_weight_sindy_z'], dtype=torch.float32) * losses['sindy_z'] +
-                    torch.tensor(params['loss_weight_sindy_x'], dtype=torch.float32) * losses['sindy_x'] +
-                    torch.tensor(params['loss_weight_sindy_regularization'], dtype=torch.float32) * losses['sindy_regularization'])
+        total_loss = (params['loss_weight_decoder'] * losses['decoder'] +
+                    params['loss_weight_sindy_z'] * losses['sindy_z'] +
+                    params['loss_weight_sindy_x'] * losses['sindy_x'] +
+                    params['loss_weight_sindy_regularization'] * losses['sindy_regularization'])
         
-        loss_refinement = (torch.tensor(params['loss_weight_decoder'], dtype=torch.float32) * losses['decoder'] +
-                    torch.tensor(params['loss_weight_sindy_z'], dtype=torch.float32) * losses['sindy_z'] +
-                    torch.tensor(params['loss_weight_sindy_x'], dtype=torch.float32) * losses['sindy_x'])
+        loss_refinement = (params['loss_weight_decoder'] * losses['decoder'] +
+                    params['loss_weight_sindy_z'] * losses['sindy_z'] +
+                    params['loss_weight_sindy_x'] * losses['sindy_x'])
 
         return total_loss, losses, loss_refinement
     
@@ -168,7 +168,7 @@ def sindy_library_tf(z, latent_dim, poly_order, include_sine=False):
         number of library functions. The number of library functions is determined by the number
         of state variables of the input, the polynomial order, and whether or not sines are included.
     """
-    library = [torch.ones(z.size(0))]
+    library = [torch.ones(z.size(0)).to(z.device)]
 
     for i in range(latent_dim):
         library.append(z[:,i])
@@ -203,7 +203,7 @@ def sindy_library_tf(z, latent_dim, poly_order, include_sine=False):
         for i in range(latent_dim):
             library.append(torch.sin(z[:,i]))
 
-    return torch.stack(library, dim=1)
+    return torch.stack(library, dim=1).to(z.device)
 
 def sindy_library_tf_order2(z, dz, latent_dim, poly_order, include_sine=False):
     """
@@ -215,8 +215,8 @@ def sindy_library_tf_order2(z, dz, latent_dim, poly_order, include_sine=False):
 def z_derivative(input, dx, layers, activation):
     dz = dx
     for i, layer in enumerate(layers):
-        if i < len(layers):
-            input = layer(input)
+        if i < len(layers) - 1:
+            input = layer.linear(input)
             if activation == 'elu':
                 dz = torch.where(input < 0, torch.exp(input), torch.ones_like(input)) * layer.linear(dz)
                 input = torch.elu(input)
@@ -224,10 +224,10 @@ def z_derivative(input, dx, layers, activation):
                 dz = (input > 0).float() * layer.linear(dz)
                 input = torch.relu(input)
             elif activation == 'sigmoid':
-                dz = torch.sigmoid(input) * (1 - torch.sigmoid(input)) * layer.linear(dz)
                 input = torch.sigmoid(input)
-            else:
-                dz = layer.linear(dz)
+                dz = input * (1 - input) * layer.linear(dz)
+        else:
+            dz = layer.linear(dz)
     return dz
 
 def z_derivative_order2(input, dx, ddx, layers, activation):
