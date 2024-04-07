@@ -240,8 +240,8 @@ def z_derivative_order2(input, dx, ddx, layers, activation):
 
             if activation == 'elu':
                 # ELU derivative: exp(input) if input < 0 else 1
-                elu_derivative = torch.where(input < 0, torch.exp(input), torch.tensor(1.0))
-                elu_double_derivative = torch.where(input < 0, torch.exp(input), torch.tensor(0.0))
+                elu_derivative = torch.where(input < 0, input, torch.tensor(1.0))
+                elu_double_derivative = torch.where(input < 0, input, torch.tensor(0.0))
                 
                 dz_prev = layer.linear(dz)
                 ddz_prev = layer.linear(ddz)
@@ -250,7 +250,6 @@ def z_derivative_order2(input, dx, ddx, layers, activation):
                 dz = elu_derivative * dz_prev
                 ddz = elu_double_derivative * dz_prev * dz_prev + elu_derivative * ddz_prev
 
-                input = torch.elu(input)
 
             elif activation == 'relu':
                 # ReLU derivative: 1 if input > 0 else 0
@@ -264,12 +263,11 @@ def z_derivative_order2(input, dx, ddx, layers, activation):
                 dz = relu_derivative * dz_prev
                 ddz = relu_double_derivative * dz_prev * dz_prev + relu_derivative * ddz_prev
 
-                input = torch.relu(input)
 
             elif activation == 'sigmoid':
                 # Sigmoid derivative: sigmoid(input) * (1 - sigmoid(input))
-                sigmoid_derivative = F.sigmoid(input) * (1 - F.sigmoid(input))
-                sigmoid_double_derivative = F.sigmoid(input) * (1 - F.sigmoid(input)) * (1 - 2 * F.sigmoid(input))
+                sigmoid_derivative = input * (1 - input)
+                sigmoid_double_derivative = input * (1 - input) * (1 - 2 * input)
 
                 dz_prev = layer.linear(dz)
                 ddz_prev = layer.linear(ddz)
@@ -278,7 +276,6 @@ def z_derivative_order2(input, dx, ddx, layers, activation):
                 dz = sigmoid_derivative * dz_prev
                 ddz = sigmoid_double_derivative * dz_prev * dz_prev + sigmoid_derivative * ddz_prev
 
-                input = torch.sigmoid(input)
 
             # Add other activation conditions here
         else:

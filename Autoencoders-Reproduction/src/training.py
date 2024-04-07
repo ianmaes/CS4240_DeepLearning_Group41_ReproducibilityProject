@@ -24,7 +24,7 @@ def train_network(training_data, val_data, params):
         sindy_predict_norm_x = torch.mean(val_data['ddx']**2)
 
     validation_losses = []
-    sindy_model_terms = [torch.sum(torch.tensor(params['coefficient_mask']))]
+    sindy_model_terms = [torch.sum(torch.tensor(params['coefficient_mask'])).cpu().numpy()]
 
     print('TRAINING')
     autoencoder_network.train()
@@ -35,7 +35,7 @@ def train_network(training_data, val_data, params):
             batch_idxs = np.arange(j * params['batch_size'], (j + 1) * params['batch_size'])
             train_dict = create_feed_dictionary(training_data, params, idxs=batch_idxs)
             optimizer.zero_grad()
-            loss_val, _, _ = autoencoder_network.define_loss(train_dict['x'], train_dict['dx'],train_dict['ddx'], params=params)
+            loss_val, _, _ = autoencoder_network.define_loss(train_dict['x'], train_dict['dx'], train_dict['ddx'], params=params)
             loss_val.backward()
             optimizer.step()
             
@@ -47,7 +47,7 @@ def train_network(training_data, val_data, params):
             params['coefficient_mask'] = torch.abs(autoencoder_network.sindy_coefficients) > params['coefficient_threshold']
             validation_dict['coefficient_mask'] = params['coefficient_mask']
             print('THRESHOLDING: %d active coefficients' % torch.sum(params['coefficient_mask']))
-            sindy_model_terms.append(torch.sum(params['coefficient_mask']))
+            sindy_model_terms.append(torch.sum(params['coefficient_mask']).cpu().numpy())
 
     print('REFINEMENT')
     for i_refinement in range(params['refinement_epochs']):
@@ -83,10 +83,10 @@ def train_network(training_data, val_data, params):
         results_dict['sindy_predict_norm_x'] = sindy_predict_norm_x
         results_dict['sindy_predict_norm_z'] = sindy_predict_norm_z.item()
         results_dict['sindy_coefficients'] = sindy_coefficients
-        results_dict['loss_decoder'] = final_losses[0].item()
-        results_dict['loss_decoder_sindy'] = final_losses[1].item()
-        results_dict['loss_sindy'] = final_losses[2].item()
-        results_dict['loss_sindy_regularization'] = final_losses[3].item()
+        results_dict['loss_decoder'] = final_losses['decoder'].item()
+        results_dict['loss_decoder_sindy'] = final_losses['sindy_z'].item()
+        results_dict['loss_sindy'] = final_losses['sindy_x'].item()
+        results_dict['loss_sindy_regularization'] = final_losses['sindy_regularization'].item()
         results_dict['validation_losses'] = np.array(validation_losses)
         results_dict['sindy_model_terms'] = np.array(sindy_model_terms)
 
@@ -112,33 +112,47 @@ def print_progress(network, i, params, train_dict, validation_dict, x_norm, sind
     network.eval()
     with torch.no_grad():
         # Compute losses for training data
-        train_total_loss, train_losses, _ = network.define_loss( train_dict['x'].to(params['device']),
-                                                                train_dict['dx'].to(params['device']),
-                                                                train_dict['ddx'].to(params['device']),
+        if params['model_order'] == 2:
+            train_total_loss, train_losses, _ = network.define_loss( train_dict['x'].to(params['device']),
+                                                                    train_dict['dx'].to(params['device']),
+                                                                    train_dict['ddx'].to(params['device']),
+                                                                    params=params)
+
+            # Compute losses for validation data
+            val_total_loss, val_losses, _ = network.define_loss(validation_dict['x'].to(params['device']),
+                                                                validation_dict['dx'].to(params['device']),
+                                                                validation_dict['ddx'].to(params['device']),
                                                                 params=params)
+            
+        else:
+            train_total_loss, train_losses, _ = network.define_loss(train_dict['x'].to(params['device']),
+                                                                    train_dict['dx'].to(params['device']),
+                                                                    None,
+                                                                    params=params)
 
-        # Compute losses for validation data
-        val_total_loss, val_losses, _ = network.define_loss(validation_dict['x'].to(params['device']),
-                                                            validation_dict['dx'].to(params['device']),
-                                                            validation_dict['ddx'].to(params['device']),
-                                                            params=params)
-
+            # Compute losses for validation data
+            val_total_loss, val_losses, _ = network.define_loss(validation_dict['x'].to(params['device']),
+                                                                validation_dict['dx'].to(params['device']),
+                                                                None,
+                                                                params=params)
+        current_val_losses = [val_total_loss.cpu().item()]
         print(f"Epoch {i}")
         print(f"   Training Total Loss: {train_total_loss.item()}")
         for loss_name, loss_val in train_losses.items():
             print(f"   Training {loss_name} Loss: {loss_val.item()}")
 
+
         print(f"   Validation Total Loss: {val_total_loss.item()}")
         for loss_name, loss_val in val_losses.items():
             print(f"   Validation {loss_name} Loss: {loss_val.item()}")
-
+            current_val_losses.append(loss_val.cpu().item())
         # Normalize and print decoder losses
         decoder_loss_ratio = val_losses['decoder'].item() / x_norm
         sindy_x_loss_ratio = val_losses['sindy_x'].item() / sindy_predict_norm
         print(f"Decoder Loss Ratio: {decoder_loss_ratio:.6f}, Decoder SINDy Loss Ratio: {sindy_x_loss_ratio:.6f}")
 
         network.train()
-        return val_total_loss, val_losses
+        return current_val_losses
 
 
 def create_feed_dictionary(data, params, idxs=None):
@@ -164,7 +178,8 @@ def create_feed_dictionary(data, params, idxs=None):
         idxs = np.arange(data['x'].shape[0])
     feed_dict = {
         'x': torch.tensor(data['x'][idxs], dtype=torch.float32).to(params['device']),
-        'dx': torch.tensor(data['dx'][idxs], dtype=torch.float32).to(params['device'])
+        'dx': torch.tensor(data['dx'][idxs], dtype=torch.float32).to(params['device']),
+        'ddx': None
     }
     if params['model_order'] == 2:
         feed_dict['ddx'] = torch.tensor(data['ddx'][idxs], dtype=torch.float32).to(params['device'])
