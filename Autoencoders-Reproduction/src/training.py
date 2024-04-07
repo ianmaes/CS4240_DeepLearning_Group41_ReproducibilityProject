@@ -51,6 +51,7 @@ def train_network(training_data, val_data, params):
 
     print('REFINEMENT')
     for i_refinement in range(params['refinement_epochs']):
+        print('Epoch %d' % i_refinement)
         for j in range(params['epoch_size'] // params['batch_size']):
             batch_idxs = np.arange(j * params['batch_size'], (j + 1) * params['batch_size'])
             train_dict = create_feed_dictionary(training_data, params, idxs=batch_idxs)
