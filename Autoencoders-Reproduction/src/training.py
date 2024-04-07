@@ -8,7 +8,8 @@ from autoencoder import FullNetwork
 def train_network(training_data, val_data, params):
         
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0')  # GPUs are zero-indexed, cuda:1 refers to the second GPU.
     print('Device: %s' % device)
     params['coefficient_mask'] = params['coefficient_mask'].to(device)
     # SET UP NETWORK
@@ -36,7 +37,7 @@ def train_network(training_data, val_data, params):
             batch_idxs = np.arange(j * params['batch_size'], (j + 1) * params['batch_size'])
             train_dict = create_feed_dictionary(training_data, params, idxs=batch_idxs)
             optimizer.zero_grad()
-            loss_val, _, _ = autoencoder_network.define_loss(train_dict['x'], train_dict['dx'], params=params)
+            loss_val, _, _ = autoencoder_network.define_loss(train_dict['x'], train_dict['dx'],train_dict['ddx'], params=params)
             loss_val.backward()
             optimizer.step()
             
@@ -113,10 +114,16 @@ def print_progress(network, i, params, train_dict, validation_dict, x_norm, sind
     network.eval()
     with torch.no_grad():
         # Compute losses for training data
-        train_total_loss, train_losses, _ = network.define_loss( train_dict['x'].to(params['device']) , train_dict['dx'].to(params['device']), params=params)
+        train_total_loss, train_losses, _ = network.define_loss( train_dict['x'].to(params['device']),
+                                                                train_dict['dx'].to(params['device']),
+                                                                train_dict['ddx'].to(params['device']),
+                                                                params=params)
 
         # Compute losses for validation data
-        val_total_loss, val_losses, _ = network.define_loss(validation_dict['x'].to(params['device']), validation_dict['dx'].to(params['device']),  params=params)
+        val_total_loss, val_losses, _ = network.define_loss(validation_dict['x'].to(params['device']),
+                                                            validation_dict['dx'].to(params['device']),
+                                                            validation_dict['ddx'].to(params['device']),
+                                                            params=params)
 
         print(f"Epoch {i}")
         print(f"   Training Total Loss: {train_total_loss.item()}")

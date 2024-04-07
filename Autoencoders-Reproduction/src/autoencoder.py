@@ -47,12 +47,14 @@ class FullNetwork(nn.Module):
     def forward(self, x, dx, ddx=None):
     
         z, x_decode = self.autoencoder(x)
-
+        ddz = None
+        ddx_decode = None
         # Derivative computation
         if self.model_order == 1:
             dz = z_derivative(x, dx, self.autoencoder.encoder, activation=self.activation_name)
             self.Theta = sindy_library_tf(z, self.latent_dim, self.poly_order, self.include_sine)
         else:
+            # print("x:", x, "dx:", dx, "ddx:", ddx)
             dz, ddz = z_derivative_order2(x, dx, ddx, self.autoencoder.encoder, activation=self.activation_name)
             self.Theta = sindy_library_tf_order2(z, dz, self.latent_dim, self.poly_order, self.include_sine)
         Theta = self.Theta
@@ -63,8 +65,7 @@ class FullNetwork(nn.Module):
         else:
             sindy_predict = torch.matmul(Theta, self.sindy_coefficients)
             
-        ddz = None
-        ddx_decode = None
+
         # Decode derivatives
         if self.model_order == 1:
             dx_decode = z_derivative(z, sindy_predict, self.autoencoder.decoder, activation=self.activation_name)
