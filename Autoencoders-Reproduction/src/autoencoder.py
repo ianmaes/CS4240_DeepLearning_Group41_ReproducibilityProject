@@ -234,52 +234,56 @@ def z_derivative(input, dx, layers, activation):
 def z_derivative_order2(input, dx, ddx, layers, activation):
     dz = dx
     ddz = ddx
-    for i, layer in enumerate(layers):
-        if i < len(layers) - 1:
-            input = layer(input)
+# Initial dz and ddz definitions assumed to be provided above this snippet.
 
-            if activation == 'elu':
-                # ELU derivative: exp(input) if input < 0 else 1
-                elu_derivative = torch.where(input < 0, input, torch.tensor(1.0))
-                elu_double_derivative = torch.where(input < 0, input, torch.tensor(0.0))
-                
+    if activation == 'elu':
+        for i, layer in enumerate(layers):
+            if i < len(layers) - 1:
+                input = layer(input)
+                elu_derivative = torch.where(input < 0, torch.exp(input), torch.tensor(1.0))
+                elu_double_derivative = torch.where(input < 0, torch.exp(input), torch.tensor(0.0))
+
                 dz_prev = layer.linear(dz)
                 ddz_prev = layer.linear(ddz)
 
-                # Apply the chain rule for the first and second derivative
                 dz = elu_derivative * dz_prev
-                ddz = elu_double_derivative * dz_prev * dz_prev + elu_derivative * ddz_prev
+                ddz = elu_double_derivative * dz_prev ** 2 + elu_derivative * ddz_prev
+            else:
+                dz = layer.linear(dz)
+                ddz = layer.linear(ddz)
 
-
-            elif activation == 'relu':
-                # ReLU derivative: 1 if input > 0 else 0
+    elif activation == 'relu':
+        for i, layer in enumerate(layers):
+            if i < len(layers) - 1:
+                input = layer(input)
                 relu_derivative = (input > 0).float()
-                relu_double_derivative = torch.zeros_like(input) # second derivative of ReLU is 0
+                relu_double_derivative = torch.zeros_like(input)
 
                 dz_prev = layer.linear(dz)
                 ddz_prev = layer.linear(ddz)
 
-                # Apply the chain rule for the first and second derivative
                 dz = relu_derivative * dz_prev
-                ddz = relu_double_derivative * dz_prev * dz_prev + relu_derivative * ddz_prev
+                ddz = relu_double_derivative * dz_prev ** 2 + relu_derivative * ddz_prev
+            else:
+                dz = layer.linear(dz)
+                ddz = layer.linear(ddz)
 
-
-            elif activation == 'sigmoid':
-                # Sigmoid derivative: sigmoid(input) * (1 - sigmoid(input))
-                sigmoid_derivative = input * (1 - input)
-                sigmoid_double_derivative = input * (1 - input) * (1 - 2 * input)
+    elif activation == 'sigmoid':
+        for i, layer in enumerate(layers):
+            if i < len(layers) - 1:
+                input = layer(input)
+                sigmoid = torch.sigmoid(input)
+                sigmoid_derivative = sigmoid * (1 - sigmoid)
+                sigmoid_double_derivative = sigmoid * (1 - sigmoid) * (1 - 2 * sigmoid)
 
                 dz_prev = layer.linear(dz)
                 ddz_prev = layer.linear(ddz)
 
-                # Apply the chain rule for the first and second derivative
                 dz = sigmoid_derivative * dz_prev
-                ddz = sigmoid_double_derivative * dz_prev * dz_prev + sigmoid_derivative * ddz_prev
-
-
-            # Add other activation conditions here
-        else:
-            dz = layer.linear(dz)
-            ddz = layer.linear(ddz)
+                ddz = sigmoid_double_derivative * dz_prev ** 2 + sigmoid_derivative * ddz_prev
+            else:
+                dz = layer.linear(dz)
+                ddz = layer.linear(ddz)
 
     return dz, ddz
+

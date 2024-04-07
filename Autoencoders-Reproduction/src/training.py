@@ -56,7 +56,7 @@ def train_network(training_data, val_data, params):
             batch_idxs = np.arange(j * params['batch_size'], (j + 1) * params['batch_size'])
             train_dict = create_feed_dictionary(training_data, params, idxs=batch_idxs)
             optimizer.zero_grad()
-            loss_val, _, _ = autoencoder_network.define_loss(torch.tensor(train_dict['x'], dtype=torch.float32), torch.tensor(train_dict['dx'], dtype=torch.float32), params=params)           
+            loss_val, _, _ = autoencoder_network.define_loss(torch.tensor(train_dict['x'], dtype=torch.float32), torch.tensor(train_dict['dx'], dtype=torch.float32),torch.tensor(train_dict['ddx'], dtype=torch.float32), params=params)           
             loss_val.backward()
             optimizer.step()
 
@@ -70,9 +70,9 @@ def train_network(training_data, val_data, params):
 
     with torch.no_grad():
         autoencoder_network.eval()
-        loss_val, final_losses, _ = autoencoder_network.define_loss(torch.tensor(validation_dict['x'], dtype=torch.float32), torch.tensor(validation_dict['dx'], dtype=torch.float32), params=params)
+        loss_val, final_losses, _ = autoencoder_network.define_loss(torch.tensor(validation_dict['x'], dtype=torch.float32), torch.tensor(validation_dict['dx'], dtype=torch.float32),validation_dict['ddx'], params=params)
 
-        _, _, _, _, _, _, _, sindy_predict = autoencoder_network(torch.tensor(validation_dict['x'], dtype=torch.float32), torch.tensor(validation_dict['dx'], dtype=torch.float32))
+        _, _, _, _, _, _, _, sindy_predict = autoencoder_network(torch.tensor(validation_dict['x'], dtype=torch.float32), torch.tensor(validation_dict['dx'], dtype=torch.float32), validation_dict['ddx'],)
 
             # Compute the norm of the SINDy predictions in the latent space
         sindy_predict_norm_z = torch.mean(sindy_predict**2)
