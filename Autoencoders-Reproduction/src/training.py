@@ -6,8 +6,6 @@ import pickle
 from autoencoder import FullNetwork
 
 def train_network(training_data, val_data, params):
-        
-
     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     device = torch.device('cuda:0')  # GPUs are zero-indexed, cuda:1 refers to the second GPU.
     print('Device: %s' % device)
