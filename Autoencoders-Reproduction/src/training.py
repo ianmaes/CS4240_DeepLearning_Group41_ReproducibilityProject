@@ -29,7 +29,7 @@ def train_network(training_data, val_data, params):
     print('TRAINING')
     autoencoder_network.train()
     for i in range(params['max_epochs']):
-        print('Epoch %d' % i)
+        # print('Epoch %d' % i)
         for j in range(params['epoch_size'] // params['batch_size']):
             autoencoder_network.train()
             batch_idxs = np.arange(j * params['batch_size'], (j + 1) * params['batch_size'])
@@ -51,7 +51,7 @@ def train_network(training_data, val_data, params):
 
     print('REFINEMENT')
     for i_refinement in range(params['refinement_epochs']):
-        print('Epoch %d' % i_refinement)
+        # print('Epoch %d' % i_refinement)
         for j in range(params['epoch_size'] // params['batch_size']):
             batch_idxs = np.arange(j * params['batch_size'], (j + 1) * params['batch_size'])
             train_dict = create_feed_dictionary(training_data, params, idxs=batch_idxs)
