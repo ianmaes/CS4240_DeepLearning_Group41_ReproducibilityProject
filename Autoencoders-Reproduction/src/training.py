@@ -6,8 +6,6 @@ import pickle
 from autoencoder import FullNetwork
 
 def train_network(training_data, val_data, params):
-        
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Device: %s' % device)
     params['coefficient_mask'] = params['coefficient_mask'].to(device)
