@@ -51,18 +51,18 @@ def train_network(training_data, val_data, params):
 
     print('REFINEMENT')
     for i_refinement in range(params['refinement_epochs']):
-        # print('Epoch %d' % i_refinement)
+        print('Epoch %d' % i_refinement)
         for j in range(params['epoch_size'] // params['batch_size']):
             batch_idxs = np.arange(j * params['batch_size'], (j + 1) * params['batch_size'])
             train_dict = create_feed_dictionary(training_data, params, idxs=batch_idxs)
             optimizer.zero_grad()
-            loss_val, _, _ = autoencoder_network.define_loss(torch.tensor(train_dict['x'], dtype=torch.float32), torch.tensor(train_dict['dx'], dtype=torch.float32),torch.tensor(train_dict['ddx'], dtype=torch.float32), params=params)           
+            loss_val, _, _ = autoencoder_network.define_loss(torch.tensor(train_dict['x'], dtype=torch.float32), torch.tensor(train_dict['dx'], dtype=torch.float32), train_dict['ddx'], params=params)           
             loss_val.backward()
             optimizer.step()
 
         if params['print_progress'] and (i_refinement % params['print_frequency'] == 0):
             with torch.no_grad():
-                validation_losses.append(print_progress(autoencoder_network, i, params, train_dict, validation_dict, x_norm, sindy_predict_norm_x))
+                validation_losses.append(print_progress(autoencoder_network, i_refinement, params, train_dict, validation_dict, x_norm, sindy_predict_norm_x))
                 
 
     torch.save(autoencoder_network.state_dict(), params['data_path'] + params['save_name'] + '.pth')
